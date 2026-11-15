@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Lint (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Ruff
+        run: uvx ruff check tools
+      - name: Syntax check
+        run: python3 -m compileall -q tools
+
+  data:
+    name: Validate data files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JSON validity
+        run: |
+          for f in docs/sections.json docs/one-fuzz/sections.json video/meta.json video-one-fuzz/meta.json video/hyperframes.json video-one-fuzz/hyperframes.json; do
+            [ -f "$f" ] || { echo "skip $f"; continue; }
+            python3 -m json.tool "$f" > /dev/null && echo "ok $f"
+          done
+      - name: audio-data.js parses
+        run: |
+          for d in video video-one-fuzz; do
+            [ -f "$d/audio-data.js" ] || { echo "skip $d"; continue; }
+            node --check "$d/audio-data.js" && echo "ok $d/audio-data.js"
+          done
+
+  hyperframes:
+    name: HyperFrames lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [video, video-one-fuzz]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lint composition
+        if: hashFiles(format('{0}/index.html', matrix.project)) != ''
+        working-directory: ${{ matrix.project }}
+        run: npx --yes hyperframes@0.9.30 lint
