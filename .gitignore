@@ -218,3 +218,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# musicvis: media, generated output and per-track projects
+audio/*
+!audio/.gitkeep
+renders/*
+!renders/.gitkeep
+analysis/*
+!analysis/.gitkeep
+video*/
+*.wav
+*.mp3
+*.flac
+*.mp4
+*.npz
