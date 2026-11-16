@@ -53,6 +53,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Track audio is gitignored; stub silent WAVs so the lint can resolve <audio src>.
+      - name: Stub gitignored audio
+        if: hashFiles(format('{0}/index.html', matrix.project)) != ''
+        working-directory: ${{ matrix.project }}
+        run: |
+          grep -oE '<audio[^>]*src="[^"]+"' index.html | sed -E 's/.*src="([^"]+)"/\1/' | while read -r f; do
+            [ -f "$f" ] && continue
+            mkdir -p "$(dirname "$f")"
+            python3 -c "import sys,wave; w=wave.open(sys.argv[1],'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100); w.writeframes(b'\0'*4*44100); w.close()" "$f"
+            echo "stubbed $f"
+          done
       - name: Lint composition
         if: hashFiles(format('{0}/index.html', matrix.project)) != ''
         working-directory: ${{ matrix.project }}

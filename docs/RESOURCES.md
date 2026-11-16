@@ -17,6 +17,7 @@
 - **three.js** + custom GLSL / postprocessing for grid, shards, ribbon (Line2/TubeGeometry), bloom.
 - **@vysmo/effects**: WebGL2 filters incl. datamosh, VHS, scanlines, lens distortion (no pixel sort).
 - Pixel sorting: approximate in a fragment shader (brightness threshold + directional sort) or do a CPU pass in Python/numpy on rendered frames, then ffmpeg.
+- Glitch order tip: slice displacement first, then RGB split on displaced UVs. Use #FF2E93 / #19E3FF as the two split channels.
 - Browser references: Codrops audio visualizer tutorials (tympanus.net/codrops, 2023 & 2025).
 
 ## Post / delivery

@@ -1,0 +1,15 @@
+{
+  "_note": "PROVISIONAL - inferred from structural segmentation + energy dips (bar = 1.717s @139.7bpm). Edit times to match the real song, then run: uv run tools/build_data.py",
+  "sections": [
+    {"name": "intro",    "type": "intro",  "start": 0.0,   "end": 14.4},
+    {"name": "verse1",   "type": "verse",  "start": 14.4,  "end": 29.8},
+    {"name": "pre1",     "type": "pre",    "start": 29.8,  "end": 33.2},
+    {"name": "chorus1",  "type": "chorus", "start": 33.2,  "end": 46.9},
+    {"name": "verse2",   "type": "verse",  "start": 46.9,  "end": 74.4},
+    {"name": "pre2",     "type": "pre",    "start": 74.4,  "end": 77.8},
+    {"name": "chorus2",  "type": "chorus", "start": 77.8,  "end": 91.5},
+    {"name": "break",    "type": "break",  "start": 91.5,  "end": 118.9},
+    {"name": "final",    "type": "chorus", "start": 118.9, "end": 162.0, "final": true},
+    {"name": "end",      "type": "end",    "start": 162.0, "end": 169.92}
+  ]
+}

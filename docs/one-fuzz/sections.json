@@ -1,0 +1,108 @@
+{
+  "_note": "Approved by ear 2026-11-11 against renders/one-fuzz_check.wav. bar-snapped from Suno stem activity on the tempo-following grid (analysis/one-fuzz.grid.json); end = final chord hit. Check by ear: uv run tools/build_one_fuzz.py --check -> renders/one-fuzz_check.wav",
+  "sections": [
+    {
+      "name": "intro",
+      "type": "intro",
+      "start": 0.0,
+      "end": 14.51
+    },
+    {
+      "name": "verse1",
+      "type": "verse",
+      "start": 14.51,
+      "end": 41.84
+    },
+    {
+      "name": "solo1",
+      "type": "solo",
+      "start": 41.84,
+      "end": 55.49
+    },
+    {
+      "name": "drop1",
+      "type": "drop",
+      "start": 55.49,
+      "end": 69.18
+    },
+    {
+      "name": "verse2",
+      "type": "verse",
+      "start": 69.18,
+      "end": 82.81
+    },
+    {
+      "name": "solo2",
+      "type": "solo",
+      "start": 82.81,
+      "end": 91.28
+    },
+    {
+      "name": "drop2",
+      "type": "drop",
+      "start": 91.28,
+      "end": 96.38
+    },
+    {
+      "name": "breakdown",
+      "type": "breakdown",
+      "start": 96.38,
+      "end": 103.17
+    },
+    {
+      "name": "build",
+      "type": "solo",
+      "start": 103.17,
+      "end": 109.93
+    },
+    {
+      "name": "drop3",
+      "type": "drop",
+      "start": 109.93,
+      "end": 116.74
+    },
+    {
+      "name": "solo3",
+      "type": "solo",
+      "start": 116.74,
+      "end": 123.5
+    },
+    {
+      "name": "drop3b",
+      "type": "drop",
+      "start": 123.5,
+      "end": 136.99
+    },
+    {
+      "name": "verse3",
+      "type": "verse",
+      "start": 136.99,
+      "end": 150.62
+    },
+    {
+      "name": "verse4",
+      "type": "verse",
+      "start": 150.62,
+      "end": 160.84
+    },
+    {
+      "name": "final",
+      "type": "drop",
+      "start": 160.84,
+      "end": 215.05,
+      "final": true
+    },
+    {
+      "name": "end",
+      "type": "end",
+      "start": 215.05,
+      "end": 222.8
+    },
+    {
+      "name": "silence",
+      "type": "silence",
+      "start": 222.8,
+      "end": 223.04
+    }
+  ]
+}
