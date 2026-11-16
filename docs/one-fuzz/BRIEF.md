@@ -20,6 +20,7 @@ Inks multiply over the paper like real overprint (pink over teal = dark overprin
 - Arp synth loop: a repeating stencilled motif that steps along on the 16ths
 - Fretless bass runs: one continuous pen line wanders and leaves a drawn trail
 - Acid bassline: slow teal halftone tint breathing under the verses
+- Stereo image: fretless pan pulls the pen line left/right; a wide fuzz pushes the pink pour further past the black
 - Misregistration: each ink layer re-pulls per bar and jolts on heavy kicks
 - Pops: strong kicks slam a coarse black halftone plate, strong snares print a torn teal band across the page (both gone within a few frames); inside a black flood they print as knockouts
 

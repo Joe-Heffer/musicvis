@@ -33,6 +33,8 @@ uniform float uBar;        // fractional bar position
 uniform float uBeat16;     // sixteenth-note counter (integer-valued)
 uniform vec2  uShake;
 uniform float uRibGain, uRibFlick;
+uniform float uShardDx;   // guitar-pan drift of the shard lattice (scene units)
+uniform float uWidth;     // mix stereo width 0..1: scales the channel split
 uniform float uRib[64];
 uniform float uRibE[64];
 out vec4 outColor;
@@ -89,7 +91,7 @@ float scene(vec2 p){
   float sh = 0.0;
   for (int k = 0; k < 2; k++) {
     float sc = k == 0 ? 0.42 : 0.27;
-    vec2 q = p / sc + float(k) * 3.7;
+    vec2 q = (p + vec2(uShardDx, 0.0)) / sc + float(k) * 3.7;
     vec2 id = floor(q);
     vec2 c = fract(q) - 0.5;
     float hh = hash21(id + float(k) * 11.0);
@@ -150,7 +152,7 @@ void main(){
   g = (floor(g * cres) + 0.5) / cres;
 
   vec2 p = (g - 0.5) * vec2(asp, 1.0);
-  vec2 ca = vec2(uCA * 0.006, 0.0);
+  vec2 ca = vec2(uCA * 0.006 * (0.7 + 0.6 * uWidth), 0.0);
   float L0 = scene(p);
   vec3 col = ramp(L0);
   if (uCA > 0.002) {
@@ -280,6 +282,8 @@ void main(){
           gl.uniform2f(u("uShake"), sgn("shx", s) * 0.012, sgn("shy", s) * 0.012);
           gl.uniform1f(u("uRibGain"), c("rib", f));
           gl.uniform1f(u("uRibFlick"), c("flick", f));
+          gl.uniform1f(u("uShardDx"), A.sdx[s] / 1000);
+          gl.uniform1f(u("uWidth"), c("wid", s));
           for (var i = 0; i < 64; i++) {
             var fi = f + Math.round((i / 63 - 0.7) * 120);
             rib[i] = c("pitch", fi);

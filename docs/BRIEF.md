@@ -24,6 +24,7 @@ Proportions 80% base/greys, 15% magenta+cyan, 5% flash+violet. Channel-split use
 - Sub bass: slow background brightness swell
 - Tape-stop fills: time-remapped slowdown + chromatic aberration
 - Sidechain pump: whole frame breathes on the beat in choruses
+- Stereo image: guitar pan drifts the shard lattice sideways; mix width widens the magenta/cyan split
 
 ## Sections
 | Section | Image | Colour |

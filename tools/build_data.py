@@ -8,6 +8,7 @@ browser composition stays a pure function of the frame index (deterministic rend
 import argparse, json
 from pathlib import Path
 import numpy as np
+from stereo import stereo, unit_pan, unit_width
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -49,6 +50,13 @@ def main():
     stut = np.clip(np.convolve(hits, np.ones(12), "same") / 3.0, 0, 1)
     sub = np.clip(smooth(fit(bass["bands"]["sub"]), 20) * 1.3, 0, 1)
     riff = np.clip((smooth(fit(gtr["rms"]), 2) - 0.12) * 1.8, 0, 1)
+    # stereo: guitar pan drifts the shard lattice sideways; mix width scales the magenta/cyan split
+    sdir = ROOT / "audio" / "stems" / "htdemucs_6s" / a.track
+    img = stereo({"guitar": sdir / "guitar.wav", "mix": ROOT / "audio" / f"{a.track}.wav"}, fps, n,
+                 ROOT / "analysis" / f"{a.track}.stereo.npz")
+    gpan = unit_pan(img["guitar"][0])
+    sdx = np.cumsum(gpan * 0.25 / fps)                       # scene units; 0.25/s at full pan
+    wid = unit_width(img["mix"][1])
     echo = np.clip(smooth(fit(pno["rms"]), 15) * 1.2, 0, 1)
     # melody: per frame take the loudest of other/piano/vocals as the "synth lead" and use its raw f0
     import librosa
@@ -143,11 +151,13 @@ def main():
     q = lambda x: np.clip(np.round(np.asarray(x) * 255), 0, 255).astype(int).tolist()
     ch = dict(kick=q(kick), snare=q(snare), glitch=q(glitch), sub=q(sub), riff=q(riff), synth=q(synth), echo=q(echo),
               pitch=q(pitch), intro=q(intro), verse=q(verse), pre=q(pre), chorus=q(chorus), brk=q(brk), fin=q(fin),
-              bright=q(bright), crush=q(crush), ca=q(ca), flash=q(flash), pump=q(pump), rib=q(rib), flick=q(flick),
+              bright=q(bright), wid=q(wid), crush=q(crush), ca=q(ca), flash=q(flash), pump=q(pump), rib=q(rib), flick=q(flick),
               shx=np.round(shx).astype(int).tolist(), shy=np.round(shy).astype(int).tolist())
-    out = dict(fps=fps, n=n, ch=ch, src=src.astype(int).tolist(), tm=np.round(tm).astype(int).tolist(),
+    out = dict(fps=fps, n=n, ch=ch, src=src.astype(int).tolist(), tm=np.round(tm).astype(int).tolist(), sdx=np.round(sdx * 1000).astype(int).tolist(),
                bar=np.round(barpos * 100).astype(int).tolist(), b16=b16.tolist(), lastBeat=float(last))
     Path(a.out).write_text("window.AUDIO=" + json.dumps(out, separators=(",", ":")) + ";\n")
+    print("stereo: guitar pan p5/95", np.percentile(gpan, [5, 95]).round(2), "shard drift range",
+          round(float(sdx.min()), 2), round(float(sdx.max()), 2), "mix width p50", round(float(np.median(wid)), 2))
     print("wrote", a.out, "frames", n, "last beat", round(last, 2), "tempo", round(d["tempo"], 1))
 
 if __name__ == "__main__":

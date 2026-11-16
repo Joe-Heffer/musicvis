@@ -24,6 +24,7 @@ from scipy.ndimage import median_filter, gaussian_filter1d
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 from build_data import hash01, smooth  # noqa: E402
+from stereo import stereo, unit_pan, unit_width  # noqa: E402
 
 TRACK = "one-fuzz"
 ASP = 16 / 9
@@ -241,6 +242,9 @@ def main():
         e = bass[i] if bass[i] > e else e * 0.88 + bass[i] * 0.12
         env[i] = e
     dropw = drop * (1 + 0.15 * fin)
+    # stereo: a wide fuzz pushes the pink pour further past the black; fretless pan biases the pen
+    img = stereo({k: STEMS / f"{k}.wav" for k in ("bass", "guitar")}, fps, n, ROOT / "analysis" / f"{TRACK}.stereo.npz")
+    bwid = unit_width(img["bass"][1]); gpan = unit_pan(img["guitar"][0])
     Sb = np.abs(librosa.stft(load("bass"), n_fft=2048, hop_length=HOP)); fqb = librosa.fft_frequencies(sr=SR, n_fft=2048)
     bon, _ = band_onsets(Sb, fqb, 30, 4000, 0.2, wait_s=0.08, floor=0.25)
     acc = np.zeros(n); L = int(beat_s * fps * 1.2)
@@ -249,7 +253,7 @@ def main():
         for k in range(L):
             if f0 + k < n: acc[f0 + k] = max(acc[f0 + k], (1 - k / L) ** 1.6)
     fb = np.clip((env - 0.42) * 2.2, 0, 1.1) * (0.25 + 0.75 * acc) * dropw
-    fp = np.clip((env - 0.24) * 1.8, 0, 1.1) * (0.35 + 0.65 * acc) * dropw
+    fp = np.clip((env - 0.24) * 1.8, 0, 1.1) * (0.35 + 0.65 * acc) * dropw * (0.8 + 0.5 * bwid)
     fseed = (bar * 7 + 3) % 9973                            # flood redraws on each downbeat
 
     # ---- acid: synth stem -> slow teal tint ----
@@ -303,7 +307,7 @@ def main():
                 want = np.arctan2(cy, cx); dh = (want - hd + np.pi) % (2 * np.pi) - np.pi
                 hd += dh * min(1.0, (edge - 0.8) * 2.5)
             sp = (0.0035 + 0.006 * a)
-            x += np.cos(hd) * sp; yy += np.sin(hd) * sp
+            x += np.cos(hd) * sp + gpan[i] * 0.0025 * a; yy += np.sin(hd) * sp
             x = float(np.clip(x, 0.05, ASP - 0.05)); yy = float(np.clip(yy, 0.05, 0.95))
         prev_p = gp[i] if gr[i] > 0.08 else prev_p
         px[i], py[i], pstart[i] = x, yy, start
@@ -360,6 +364,8 @@ def main():
     dst.write_text("window.AUDIO=" + json.dumps(out, separators=(",", ":")) + ";\n")
     kinds = np.bincount([h[1] for h in hits], minlength=3)
     print("wrote", dst, "frames", n, "beats", len(beats), "downbeat", db, "grid drift ms/8 bars", drift)
+    print("stereo: bass width p50/p95 in drops", np.percentile(bwid[drop > 0.5], [50, 95]).round(2),
+          "guitar pan p5/95 while playing", np.percentile(gpan[act > 0.05], [5, 95]).round(2))
     print("hits pink/teal/black", kinds.tolist(), "stamps", len(st) // 10, "shreds", ev, "hit frame", hit,
           "pen frames", int((act > 0.05).sum()))
 
