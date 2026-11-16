@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <script src="audio-data.js"></script>
+    <style>
+      :root { --paper: #f2ede4; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); }
+      #root { width: 100%; height: 100%; position: relative; background: var(--paper); }
+      #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="223.04" data-width="1920" data-height="1080">
+      <canvas id="gl" width="1920" height="1080" data-layout-allow-overflow></canvas>
+      <audio id="track" src="assets/one-fuzz.wav" data-start="0" data-duration="223.04" data-track-index="1"></audio>
+    </div>
+
+    <script id="fs" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+uniform vec2 uReg[3];                 // misregistration per ink: 0 pink, 1 teal, 2 black (page units)
+uniform float uShred, uShredSeed, uShredN, uShredO;
+uniform float uFloodB, uFloodP, uFloodSeed;
+uniform vec2 uFloodDir;
+uniform float uAcid, uAcidSeed;
+uniform float uStStep, uStOn, uStY, uStTile;
+uniform float uEnd, uLift;
+uniform float uKick, uKickSeed, uSnare, uSnareY, uSnareSeed;   // page-wide pops on strong kicks / snares
+uniform int uCount;
+uniform vec4 uSA[64];                 // stamp rect: x, y, w, h (page units, top-left origin)
+uniform vec4 uSB[64];                 // stamp: kind, coverage, screen cell, seed
+out vec4 outColor;
+
+// ---- spot inks (docs/one-fuzz/BRIEF.md) ----
+const vec3 PAPER = vec3(0.9490, 0.9294, 0.8941); // #F2EDE4
+const vec3 PINK  = vec3(1.0,    0.2824, 0.6902); // #FF48B0
+const vec3 TEAL  = vec3(0.0,    0.5137, 0.5412); // #00838A
+const vec3 BLACK = vec3(0.1059, 0.1059, 0.1137); // #1B1B1D
+const float PX = 1.0 / 1080.0;
+const float ASP = 16.0 / 9.0;
+
+float gTooth;
+
+float h11(float p){ p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
+float h21(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float vn(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p){ float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * vn(p); p = p * 2.03 + 17.1; a *= .5; } return s / .9375; }
+
+// classic halftone screen: dot area ~ coverage
+float dots(vec2 p, float cov, float ang, float cell){
+  if (cov <= 0.002) return 0.;
+  float c = cos(ang), s = sin(ang);
+  vec2 q = mat2(c, -s, s, c) * p / cell;
+  vec2 g = fract(q) - 0.5;
+  float r = sqrt(clamp(cov, 0., 1.)) * 0.72;
+  float aa = PX / cell * 1.1;
+  return 1. - smoothstep(r - aa, r + aa, length(g));
+}
+
+// strips cut from the page, displaced, sliding home over one beat
+vec2 shred(vec2 p, out float cut){
+  cut = 0.;
+  if (uShred < 0.002) return p;
+  bool horiz = uShredO < 0.5;
+  float span = horiz ? 1.0 : ASP;
+  float u = (horiz ? p.y : p.x) / span * uShredN;
+  float id = floor(u);
+  float a = h11(id * 1.731 + uShredSeed * 7.13);
+  float b = h11(id * 3.170 + uShredSeed * 1.37);
+  float d = (a - 0.5) * 0.7 * uShred * step(0.25, b);
+  float jump = floor((b - 0.5) * 5.0) * span / uShredN * step(0.72, b) * step(0.45, uShred);
+  vec2 q = p;
+  if (horiz) { q.x += d; q.y += jump; } else { q.y += d * 0.55; q.x += jump; }
+  float w = 2.5 * PX / span * uShredN;
+  cut = step(fract(u), w) * smoothstep(0.03, 0.12, uShred);
+  return q;
+}
+
+float flood(vec2 p, float L, float seed){
+  if (L < 0.002) return 0.;
+  vec2 dir = uFloodDir;
+  float g = dot(p - vec2(ASP * 0.5, 0.5), dir) * 0.55 + 0.5;
+  float n = fbm(p * 2.1 + seed * 13.7);
+  float f = 0.6 * g + 0.4 * n;
+  float thr = L * 1.25 - 0.12;
+  float cov = 1. - smoothstep(thr - 0.002, thr + 0.002, f);
+  // dry-brush streaks along the pour near the leading edge
+  float inner = smoothstep(0.0, 0.07, thr - f);
+  float st = vn(vec2(dot(p, vec2(-dir.y, dir.x)) * 260., dot(p, dir) * 5. + seed * 3.1));
+  cov *= 1. - (1. - inner) * step(0.58, st);
+  cov *= 1. - 0.5 * step(0.93, gTooth);
+  return cov;
+}
+
+float stencil(vec2 p){
+  if (uStOn < 0.5) return 0.;
+  float tw = uStTile;
+  float x0 = (ASP - 16. * tw) * 0.5;
+  float i = floor((p.x - x0) / tw);
+  if (i < 0. || i > 15. || i > uStStep) return 0.;
+  float sc = i == uStStep ? 1.18 : 1.0;          // the newest tile prints oversize: the arp visibly ticks
+  vec2 l = vec2(p.x - x0 - (i + 0.5) * tw, p.y - uStY) / (tw * sc);
+  if (abs(l.y) > 0.5 || abs(l.x) > 0.5 / sc) return 0.;
+  float m = mod(i, 4.);
+  float r = length(l);
+  float br = 0.04;                              // stencil bridge width
+  float s;
+  if (m < 0.5) {                                // ring with two bridges
+    s = step(r, 0.42) * step(0.2, r) * step(br, abs(l.y));
+  } else if (m < 1.5) {                         // chevron
+    s = step(abs(l.y - 0.12 + abs(l.x) * 0.95), 0.12) * step(abs(l.x), 0.42) * step(br, abs(l.x));
+  } else if (m < 2.5) {                         // quartered disc
+    s = step(r, 0.40) * step(br, abs(l.x)) * step(br, abs(l.y));
+  } else {                                      // wedge pointing forward
+    s = step(max(-l.x - 0.36, abs(l.y) * 1.15 + l.x * 0.62 - 0.22), 0.);
+  }
+  return s * step(0.07, gTooth);
+}
+
+void main(){
+  vec2 fc = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 p = fc / uRes.y;                          // page units: x 0..ASP, y 0..1 (down)
+  float cut;
+  vec2 ps = shred(p, cut);
+  gTooth = vn(ps * 700.) * 0.55 + h21(floor(ps * 1080.)) * 0.45;
+
+  vec2 pP = ps - uReg[0], pT = ps - uReg[1], pB = ps - uReg[2];
+  float cP = 0., cT = 0., cB = 0.;
+
+  // acid bassline: slow teal halftone tint
+  if (uAcid > 0.002) {
+    float blob = smoothstep(0.52, 0.80, fbm(pT * 1.3 + vec2(uAcidSeed * 0.37, uTime * 0.04)));
+    cT = max(cT, dots(pT, uAcid * blob * 0.42, 0.2618, 0.021));
+  }
+
+  // arp synth: stencil band
+  cP = max(cP, stencil(pP));
+
+  // drums: halftone stamps in the rhythm grid
+  for (int i = 0; i < 64; i++) {
+    if (i >= uCount) break;
+    vec4 A = uSA[i], B = uSB[i];
+    int k = int(B.x + 0.5);
+    vec2 q = k == 0 ? pP : (k == 1 ? pT : pB);
+    vec2 l = (q - A.xy) / A.zw;
+    if (l.x < 0. || l.y < 0. || l.x > 1. || l.y > 1.) continue;
+    float edge = min(min(l.x, 1. - l.x) * A.z, min(l.y, 1. - l.y) * A.w);
+    if (edge + (vn(q * 160. + B.w) - 0.5) * 0.007 < 0.0015) continue;
+    float ang = k == 0 ? 1.309 : (k == 1 ? 0.2618 : 0.7854);
+    float v = dots(q, B.y * (0.85 + 0.3 * vn(q * 30. + B.w)), ang, B.z);
+    if (k == 0) cP = max(cP, v); else if (k == 1) cT = max(cT, v); else cB = max(cB, v);
+  }
+
+  // strong kick: a coarse black halftone plate slammed across a large part of the page
+  float hole = 0.;                               // where a pop knocks the black flood back
+  if (uKick > 0.01) {
+    float m = smoothstep(0.38, 0.62, fbm(pB * 1.4 + uKickSeed * 5.1));
+    float kd = dots(pB, uKick * 0.8 * m, 0.7854, 0.028);
+    cB = max(cB, kd);
+    hole = max(hole, kd);
+  }
+  // strong snare: a torn teal band across the full width
+  if (uSnare > 0.01) {
+    float hh = 0.05 + 0.04 * h11(uSnareSeed * 1.37);
+    float d = abs(pT.y - uSnareY) - hh + (vn(vec2(pT.x * 40., uSnareSeed)) - 0.5) * 0.03;
+    if (d < 0.) { cT = max(cT, dots(pT, uSnare * 0.95, 0.2618, 0.012)); hole = max(hole, step(0.35, uSnare)); }
+  }
+
+  // fuzz riff: ink flood (pink spreads a little further than black)
+  cP = max(cP, flood(pP, uFloodP, uFloodSeed));
+  float fB = flood(pB, uFloodB, uFloodSeed);
+  cB = max(cB, fB);
+  cB *= 1. - fB * hole;                          // inside the flood, the pop prints as a knockout
+
+  // final chord: full black, then ink lifts off as a coarsening halftone
+  if (uEnd > 0.002) {
+    cP *= 1. - uEnd; cT *= 1. - uEnd;
+    cB = uEnd * dots(pB, 1.0 - uLift, 0.7854, mix(0.006, 0.045, uLift));
+  }
+
+  float take = 0.88 + 0.12 * gTooth;
+  vec3 tP = min(PINK / PAPER, vec3(1.)), tT = min(TEAL / PAPER, vec3(1.)), tB = min(BLACK / PAPER, vec3(1.));
+  vec3 col = PAPER * (0.975 + 0.025 * gTooth);
+  col *= mix(vec3(1.), tT, cT * take);
+  col *= mix(vec3(1.), tP, cP * take);
+  col *= mix(vec3(1.), tB, cB * take);
+  col = mix(col, PAPER, cut);
+  outColor = vec4(col, 1.0);
+}
+    </script>
+
+    <script id="pfs" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in float vS;
+uniform vec3 uT;
+uniform float uA;
+out vec4 outColor;
+void main(){
+  float k = 1. - smoothstep(0.55, 1.0, abs(vS));
+  outColor = vec4(mix(vec3(1.), uT, k * uA), 1.);
+}
+    </script>
+
+    <script>
+      (function () {
+        var A = window.AUDIO;
+        var W = 1920, H = 1080, ASP = 16 / 9, PX = 1 / 1080;
+        var canvas = document.getElementById("gl");
+        var gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true, antialias: false });
+        function sh(type, src) {
+          var s = gl.createShader(type);
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+          return s;
+        }
+        function program(vsrc, fsrc) {
+          var p = gl.createProgram();
+          gl.attachShader(p, sh(gl.VERTEX_SHADER, vsrc));
+          gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsrc.replace(/^\s+/, "")));
+          gl.linkProgram(p);
+          if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+          return p;
+        }
+        var prog = program("#version 300 es\nin vec2 a;void main(){gl_Position=vec4(a,0.,1.);}",
+          document.getElementById("fs").textContent);
+        var pen = program("#version 300 es\nin vec2 a;in float s;out float vS;void main(){vS=s;gl_Position=vec4(a,0.,1.);}",
+          document.getElementById("pfs").textContent);
+
+        var quad = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+        var vaoQ = gl.createVertexArray();
+        gl.bindVertexArray(vaoQ);
+        var la = gl.getAttribLocation(prog, "a");
+        gl.enableVertexAttribArray(la);
+        gl.vertexAttribPointer(la, 2, gl.FLOAT, false, 0, 0);
+
+        var MAXP = 900;
+        var penBuf = gl.createBuffer();
+        var penData = new Float32Array(MAXP * 2 * 3);
+        gl.bindBuffer(gl.ARRAY_BUFFER, penBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, penData.byteLength, gl.DYNAMIC_DRAW);
+        var vaoP = gl.createVertexArray();
+        gl.bindVertexArray(vaoP);
+        var pa = gl.getAttribLocation(pen, "a"), ps = gl.getAttribLocation(pen, "s");
+        gl.enableVertexAttribArray(pa);
+        gl.vertexAttribPointer(pa, 2, gl.FLOAT, false, 12, 0);
+        gl.enableVertexAttribArray(ps);
+        gl.vertexAttribPointer(ps, 1, gl.FLOAT, false, 12, 8);
+        gl.bindVertexArray(null);
+
+        var U = {};
+        function u(p, n) { var k = (p === prog ? "m:" : "p:") + n; return U[k] || (U[k] = gl.getUniformLocation(p, n)); }
+
+        var CH = A.ch, N = A.n, ST = A.st, SS = 10, BF = A.bf || 12.8;
+        function cl(f) { return Math.max(0, Math.min(N - 1, f)); }
+        function c(name, f) { return CH[name][cl(f)] / 255; }
+        function sg(name, f) { return (CH[name][cl(f)] - 128) / 127; }
+        function hash(i) { var x = Math.sin((i + 1) * 12.9898) * 43758.5453; return x - Math.floor(x); }
+
+        var sa = new Float32Array(64 * 4), sb = new Float32Array(64 * 4), reg = new Float32Array(6);
+        function stamps(f) {
+          // latest 64 stamps alive at frame f (ST is sorted by start frame)
+          var k = 0, m = ST.length / SS;
+          for (var j = m - 1; j >= 0 && k < 64; j--) {
+            var o = j * SS, f0 = ST[o], life = ST[o + 1];
+            if (f0 > f) continue;
+            if (f - f0 > 400) break;
+            var age = f - f0;
+            if (age >= life) continue;
+            // full ink on the hit frame, fast fall to ~30%, then fade out over the rest of the life
+            var fade = (0.30 + 0.70 * Math.exp(-age / (BF * 0.2))) * (1 - Math.pow(age / life, 2.5));
+            var sc = age === 0 ? 1.15 : (age === 1 ? 1.06 : 1.0);   // the block lands oversize, then settles
+            if (age === 0) fade = 1.15;
+            var jolt = age < 2 ? (2 - age) * 0.0025 : 0;        // fresh pull: the plate lands slightly off, then settles
+            var ja = ST[o + 9] * 0.37;
+            sa[k * 4] = ST[o + 2] / 10000 + Math.cos(ja) * jolt; sa[k * 4 + 1] = ST[o + 3] / 10000 + Math.sin(ja) * jolt;
+            var w = ST[o + 4] / 10000, h = ST[o + 5] / 10000;
+            sa[k * 4] -= w * (sc - 1) / 2; sa[k * 4 + 1] -= h * (sc - 1) / 2;
+            sa[k * 4 + 2] = w * sc; sa[k * 4 + 3] = h * sc;
+            sb[k * 4] = ST[o + 6]; sb[k * 4 + 1] = ST[o + 7] / 100 * fade;
+            sb[k * 4 + 2] = ST[o + 8] / 10000; sb[k * 4 + 3] = ST[o + 9];
+            k++;
+          }
+          return k;
+        }
+
+        function drawPen(f, rx, ry) {
+          var s0 = A.ps[f], alpha = c("pena", f);
+          if (s0 < 0 || alpha <= 0.01 || f - s0 < 2) return;
+          var cnt = f - s0 + 1, stride = Math.max(1, Math.ceil(cnt / MAXP));
+          var idx = [];
+          for (var j = s0; j <= f; j += stride) idx.push(j);
+          if (idx[idx.length - 1] !== f) idx.push(f);
+          var n = Math.min(idx.length, MAXP), v = 0;
+          for (var i = 0; i < n; i++) {
+            var j = idx[i];
+            var x = A.px[j] / 4096 * ASP + rx, y = A.py[j] / 4096 + ry;
+            var a = idx[Math.max(0, i - 1)], b = idx[Math.min(n - 1, i + 1)];
+            var tx = (A.px[b] - A.px[a]) / 4096 * ASP, ty = (A.py[b] - A.py[a]) / 4096;
+            var tl = Math.hypot(tx, ty) || 1;
+            var nx = -ty / tl, ny = tx / tl;
+            var w = (3.2 + 2.0 * hash(Math.floor(j / 3))) * PX;     // pen pressure wobble
+            for (var sd = -1; sd <= 1; sd += 2) {
+              var X = x + nx * w * sd, Y = y + ny * w * sd;
+              penData[v++] = X / ASP * 2 - 1; penData[v++] = 1 - Y * 2; penData[v++] = sd;
+            }
+          }
+          gl.useProgram(pen);
+          gl.bindVertexArray(vaoP);
+          gl.bindBuffer(gl.ARRAY_BUFFER, penBuf);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, penData.subarray(0, v));
+          gl.uniform3f(u(pen, "uT"), 0.1059 / 0.9490, 0.1059 / 0.9294, 0.1137 / 0.8941);
+          gl.uniform1f(u(pen, "uA"), alpha);
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, n * 2);
+          gl.disable(gl.BLEND);
+        }
+
+        function draw(t) {
+          var f = cl(Math.round(t * A.fps));
+          gl.viewport(0, 0, W, H);
+          gl.useProgram(prog);
+          gl.bindVertexArray(vaoQ);
+          gl.uniform2f(u(prog, "uRes"), W, H);
+          gl.uniform1f(u(prog, "uTime"), f / A.fps);
+          for (var i = 0; i < 3; i++) {
+            reg[i * 2] = sg("rx" + i, f) * 0.012; reg[i * 2 + 1] = sg("ry" + i, f) * 0.012;
+          }
+          gl.uniform2fv(u(prog, "uReg[0]"), reg);
+          gl.uniform1f(u(prog, "uShred"), c("shred", f));
+          gl.uniform1f(u(prog, "uShredSeed"), A.sseed[f]);
+          gl.uniform1f(u(prog, "uShredN"), CH.sn[f]);
+          gl.uniform1f(u(prog, "uShredO"), A.sseed[f] % 2);
+          gl.uniform1f(u(prog, "uFloodB"), c("fb", f) * 1.0);
+          gl.uniform1f(u(prog, "uFloodP"), c("fp", f) * 1.0);
+          var fs = A.fseed[f], fa = hash(fs * 3.7) * 6.2832;
+          gl.uniform1f(u(prog, "uFloodSeed"), fs % 97);
+          gl.uniform2f(u(prog, "uFloodDir"), Math.cos(fa), Math.sin(fa));
+          gl.uniform1f(u(prog, "uAcid"), c("acid", f));
+          gl.uniform1f(u(prog, "uAcidSeed"), Math.floor(A.bar[f] / 400));
+          gl.uniform1f(u(prog, "uStStep"), CH.stp[f]);
+          gl.uniform1f(u(prog, "uStOn"), CH.ston[f]);
+          gl.uniform1f(u(prog, "uStY"), CH.sty[f] / 255);
+          gl.uniform1f(u(prog, "uStTile"), CH.stt[f] / 2550);
+          gl.uniform1f(u(prog, "uKick"), c("kp", f));
+          gl.uniform1f(u(prog, "uKickSeed"), A.kseed[f]);
+          gl.uniform1f(u(prog, "uSnare"), c("spl", f));
+          gl.uniform1f(u(prog, "uSnareY"), c("sy", f));
+          gl.uniform1f(u(prog, "uSnareSeed"), A.sseed2[f]);
+          gl.uniform1f(u(prog, "uEnd"), c("end", f));
+          gl.uniform1f(u(prog, "uLift"), c("lift", f));
+          var k = stamps(f);
+          gl.uniform1i(u(prog, "uCount"), k);
+          gl.uniform4fv(u(prog, "uSA[0]"), sa);
+          gl.uniform4fv(u(prog, "uSB[0]"), sb);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          drawPen(f, reg[4], reg[5]);
+        }
+
+        var state = { t: 0 };
+        var tl = gsap.timeline({ paused: true });
+        tl.to(state, { t: 223.04, duration: 223.04, ease: "none", onUpdate: function () { draw(state.t); } }, 0);
+        window.__timelines = window.__timelines || {};
+        window.__timelines["main"] = tl;
+        draw(0);
+        tl.seek(0);
+      })();
+    </script>
+  </body>
+</html>
